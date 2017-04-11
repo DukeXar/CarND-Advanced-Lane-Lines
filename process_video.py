@@ -17,14 +17,20 @@ class ProcessPipeline(object):
         self._camera_calibration = camera.CameraCalibration(camera_calibration_config)
         self._thresholding = camera.BinaryThreshold()
         self._perspective_warp = camera.PerspectiveWarp(perspective_warp_config.src, perspective_warp_config.dst)
-        # self._lane_search = camera.LaneSearchCentroids()
-        self._lane_search = camera.LaneSearchFitted(search_margin=100, window_width=50, window_height=80,
-                                                    image_height=720, image_width=1280)
-        #self._display_lanes = camera.DisplayLaneSearchCentroids(self._perspective_warp)
-        #self._display_lanes = camera.DisplayLaneSearchFitted(self._perspective_warp, self._lane_search.search_margin)
-        self._display_lanes = camera.DisplayLaneSearchFittedUnwarped(self._camera_calibration,
-                                                                     perspective_warp_config.src,
-                                                                     perspective_warp_config.dst)
+
+        show_centroids = False
+        if show_centroids:
+            self._lane_search = camera.LaneSearchCentroids(search_margin=100, window_width=50, window_height=80)
+            self._display_lanes = camera.DisplayLaneSearchCentroids(self._perspective_warp,
+                                                                    window_width=self._lane_search.window_width,
+                                                                    window_height=self._lane_search.window_height)
+        else:
+            self._lane_search = camera.LaneSearchFitted(search_margin=100, window_width=50, window_height=80,
+                                                        image_height=720, image_width=1280)
+            self._display_lanes = camera.DisplayLaneSearchFittedUnwarped(self._camera_calibration,
+                                                                         perspective_warp_config.src,
+                                                                         perspective_warp_config.dst)
+
         self._stages = collections.OrderedDict([
             ('cam_calibration', self._camera_calibration),
             ('thresholding', self._thresholding),
@@ -66,14 +72,14 @@ def main():
 
     clip = VideoFileClip(args.clip_file)
 
-    offset = 300
+    offset = 400
 
     # TODO: In theory, if camera is centered and rotated properly, coordinates should be symmetrical
 
     # obtained on second 20
     perspective_warp_config = camera.PerspectiveWarpConfig(src=np.float32([
         # Bottom line  left(x, y), right(x, y)
-        [320, 660], [1020, 660],
+        [315, 680], [1025, 680],
         # Top line left(x, y), right(x, y)
         [601, 448], [689, 448]
     ]), dst=np.float32([
@@ -85,7 +91,7 @@ def main():
 
     process_pipeline = ProcessPipeline(camera_calibration_config, perspective_warp_config)
 
-    if args.time:
+    if args.time is not None:
         frame = clip.get_frame(t=args.time)
         stages_dump = process_pipeline.dump_stages(frame)
 
