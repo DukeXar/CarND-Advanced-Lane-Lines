@@ -32,19 +32,23 @@ class ProcessPipeline(object):
                                                                          perspective_warp_config.dst)
 
         self._stages = collections.OrderedDict([
-            ('cam_calibration', self._camera_calibration),
-            ('thresholding', self._thresholding),
-            ('perspective_warp', self._perspective_warp),
-            ('lane_search', self._lane_search),
-            ('display_lanes', self._display_lanes),
+            ('1.cam_calibration', self._camera_calibration),
+            ('2.thresholding', self._thresholding),
+            ('3.perspective_warp', self._perspective_warp),
+            ('4.lane_search', self._lane_search),
+            ('5.display_lanes', self._display_lanes),
             #('grayscaled', camera.ScaleBinaryToGrayscale())
         ])
 
-    def process_frame(self, image):
+    def process_frame(self, image, limit=-1):
         frame = image
+        idx = 0
         for _, stage in self._stages.items():
             stage.process(frame)
             frame = stage.output
+            idx += 1
+            if limit > 0 and idx >= limit:
+                break
         return frame
 
     def dump_stages(self, image):
@@ -62,19 +66,20 @@ class ProcessPipeline(object):
 
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('clip_file', type=str, help='Clip file')
+    parser.add_argument('--clip', type=str, help='Clip file to load')
+    parser.add_argument('--image', type=str, help='Image file to load')
+    parser.add_argument('--dump-stages', action='store_true', help='Dump stages')
     parser.add_argument('target', type=str, help='Target frame file')
     parser.add_argument('--time', type=float, help='Timestamp of the frame')
     parser.add_argument('--time-from', type=float, help='Timestamp to start from')
     parser.add_argument('--time-to', type=float, help='Timestamp to end')
+    parser.add_argument('--combine', action='store_true', help='Set to produce clip with several stages combined')
 
     args = parser.parse_args()
 
-    clip = VideoFileClip(args.clip_file)
-
     offset = 400
-
-    # TODO: In theory, if camera is centered and rotated properly, coordinates should be symmetrical
+    width = 1280
+    height = 720
 
     # obtained on second 20
     perspective_warp_config = camera.PerspectiveWarpConfig(src=np.float32([
@@ -83,34 +88,68 @@ def main():
         # Top line left(x, y), right(x, y)
         [601, 448], [689, 448]
     ]), dst=np.float32([
-        [offset, clip.h], [clip.w - offset, clip.h], [offset, 0], [clip.w - offset, 0]
+        [offset, height], [width - offset, height], [offset, 0], [width - offset, 0]
     ]))
-
 
     camera_calibration_config = camera.load_camera_calibration()
 
     process_pipeline = ProcessPipeline(camera_calibration_config, perspective_warp_config)
 
-    if args.time is not None:
-        frame = clip.get_frame(t=args.time)
-        stages_dump = process_pipeline.dump_stages(frame)
+    def flip_colors(image):
+        return image[:, :, ::-1]
 
-        for name, image in stages_dump.items():
-            # Use [:,:,::-1] to flip BGR to RGB
-            if (len(image.shape) < 3) or (image.shape[2] != 3):
-                cv2.imwrite(args.target + name + '.jpg', image * 255.0)
+    def flip_process_frame(frame, limit=-1):
+        return flip_colors(process_pipeline.process_frame(flip_colors(frame), limit))
+
+    if args.clip:
+        clip = VideoFileClip(args.clip)
+        if args.time is not None:
+            frame = flip_colors(clip.get_frame(t=args.time))
+            stages_dump = process_pipeline.dump_stages(frame)
+
+            for name, image in stages_dump.items():
+                if (len(image.shape) < 3) or (image.shape[2] != 3):
+                    cv2.imwrite(args.target + '.' + name + '.jpg', image * 255.0)
+                else:
+                    cv2.imwrite(args.target + '.' + name + '.jpg', image)
+
+        else:
+            if args.time_from is not None and args.time_to is not None:
+                clip = clip.subclip(args.time_from, args.time_to)
+
+            if not args.combine:
+                processed_clip = clip.fl_image(flip_process_frame)
+                processed_clip.write_videofile(args.target)
             else:
-                cv2.imwrite(args.target + name + '.jpg', image[:, :, ::-1])
-    elif args.time_from is not None and args.time_to is not None:
-        clip = clip.subclip(args.time_from, args.time_to)
-        processed_clip = clip.fl_image(process_pipeline.process_frame)
-        processed_clip.write_videofile(args.target)
-    else:
-        processed_clip = clip.fl_image(process_pipeline.process_frame)
-        processed_clip.write_videofile(args.target)
+                # TODO: can have side-effects as pipeline is same
+                thresholded = clip.fl_image(lambda f:
+                                            flip_colors(camera.ensure_color(
+                                                process_pipeline.process_frame(flip_colors(f), limit=2)))
+                                            )
+                warp = clip.fl_image(lambda f:
+                                     flip_colors(camera.ensure_color(
+                                         process_pipeline.process_frame(flip_colors(f), limit=3)))
+                                     )
+                complete = clip.fl_image(lambda f: flip_process_frame(f, limit=-1))
+                combined_clip = clips_array([[thresholded, warp], [complete, complete]])
+                combined_clip.write_videofile(args.target)
 
-    #combined_clip = clips_array([[clip], [processed_clip]])
-    #combined_clip.write_videofile('./project_video_undistorted.mp4')
+    else:
+        frame = cv2.imread(args.image)
+
+        fname, ext = os.path.splitext(args.target)
+
+        if args.dump_stages:
+            stages_dump = process_pipeline.dump_stages(frame)
+
+            for name, image in stages_dump.items():
+                if (len(image.shape) < 3) or (image.shape[2] != 3):
+                    cv2.imwrite(fname + '.' + name + ext, image * 255.0)
+                else:
+                    cv2.imwrite(fname + '.' + name + ext, image)
+
+        processed = process_pipeline.process_frame(frame)
+        cv2.imwrite(args.target, processed)
 
 
 if __name__ == '__main__':

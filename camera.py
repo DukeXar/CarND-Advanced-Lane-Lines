@@ -196,27 +196,24 @@ class BinaryThreshold(Processor):
         return [np.zeros_like(binary_color2), binary_color2, binary_sobel]
 
     def _get_masks(self, image):
-        yuv = cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
+        yuv = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
         clahe = cv2.createCLAHE(clipLimit=2.0)
         cl1 = clahe.apply(yuv[:, :, 0])
         yuv[:, :, 0] = cl1
-        image = cv2.cvtColor(yuv, cv2.COLOR_YUV2RGB)
+        image = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
 
-        hls = cv2.cvtColor(image, cv2.COLOR_RGB2HLS).astype(np.float32)
+        hls = cv2.cvtColor(image, cv2.COLOR_BGR2HLS_FULL).astype(np.float32)
 
-        binary_color2 = np.zeros_like(hls[:, :, 2])
-        channel = image.astype(np.float32)[:, :, 0]
-        binary_color2[(channel > 210) & (channel <= 255)] = 1
+        # binary_red = np.zeros_like(hls[:, :, 2])
+        # channel = image.astype(np.float32)[:, :, 0]
+        # binary_red[(channel > 210) & (channel <= 255)] = 1
 
-        #binary_sobel = self._sobel(hls[:, :, 2], (25, 100))
-        binary_sobel = np.zeros_like(hls[:, :, 2])
+        binary_sobel = self._sobel(hls[:, :, 2], (25, 100))
+        #binary_sobel = np.zeros_like(hls[:, :, 2])
 
         yellow_line = np.zeros_like(hls[:, :, 0])
-        yellow_line[(hls[:, :, 0] >= 18) & (hls[:, :, 0] <= 28) & (hls[:, :, 2] > 45)] = 1
-        #yellow_line = self._sobel(yellow_line, (40, 100))
-
-        #white_line = np.zeros_like(hls[:, :, 0])
-        #white_line[(image[:, :, 0] > 195) & (image[:, :, 1] > 195) & (image[:, :, 2] > 50)] = 1
+        yellow_line[(hls[:, :, 0] >= 26) & (hls[:, :, 0] <= 50) & (hls[:, :, 2] > 45)] = 1
+        # yellow_line = self._sobel(yellow_line, (40, 100))
 
         white_line = np.zeros_like(hls[:, :, 0])
         white_line[(image[:, :, 0] > 220) & (image[:, :, 1] > 220) & (image[:, :, 2] > 200)] = 1
@@ -439,6 +436,9 @@ class QuadraticLaneFunc(LaneFunc):
     def load(self, points):
         self._fit = np.polyfit([item[1] for item in points], [item[0] for item in points], 2)
 
+    @property
+    def loaded(self): return self._fit is not None
+
 
 import scipy.interpolate
 
@@ -453,6 +453,9 @@ class SplineLaneFunc(LaneFunc):
     def load(self, points):
         self._spline = scipy.interpolate.UnivariateSpline([item[1] for item in points],
                                                           [item[0] for item in points])
+
+    @property
+    def loaded(self): return self._spline is not None
 
 
 class SingleLaneSearch(object):
@@ -497,11 +500,13 @@ def draw_fitted_lanes_warped(image, l_func, r_func, search_margin, left_color=(0
 
     ploty = np.linspace(0, image.shape[0] - 1, image.shape[0])
 
-    left_line_pts = get_search_points(l_func, ploty, search_margin)
-    cv2.fillPoly(window_img, np.int_([left_line_pts]), left_color)
+    if l_func.loaded:
+        left_line_pts = get_search_points(l_func, ploty, search_margin)
+        cv2.fillPoly(window_img, np.int_([left_line_pts]), left_color)
 
-    right_line_pts = get_search_points(r_func, ploty, search_margin)
-    cv2.fillPoly(window_img, np.int_([right_line_pts]), right_color)
+    if r_func.loaded:
+        right_line_pts = get_search_points(r_func, ploty, search_margin)
+        cv2.fillPoly(window_img, np.int_([right_line_pts]), right_color)
 
     result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
     return result
@@ -571,12 +576,25 @@ class DisplayLaneSearchFittedUnwarped(Processor):
         image = self._image_source.output
 
         ploty = np.linspace(0, image.shape[0] - 1, image.shape[0])
-        l_fitx = lane_funcs[0].apply(ploty)
-        r_fitx = lane_funcs[1].apply(ploty)
 
-        pts_left = np.array([np.transpose(np.vstack([l_fitx, ploty]))])
-        pts_right = np.array([np.flipud(np.transpose(np.vstack([r_fitx, ploty])))])
-        pts = np.hstack((pts_left, pts_right))
+        if lane_funcs[0].loaded:
+            l_fitx = lane_funcs[0].apply(ploty)
+            pts_left = np.array([np.transpose(np.vstack([l_fitx, ploty]))])
+        else:
+            pts_left = None
+
+        if lane_funcs[1].loaded:
+            r_fitx = lane_funcs[1].apply(ploty)
+            pts_right = np.array([np.flipud(np.transpose(np.vstack([r_fitx, ploty])))])
+        else:
+            pts_right = None
+
+        if pts_left is not None and pts_right is not None:
+            pts = np.hstack((pts_left, pts_right))
+        elif pts_left is not None:
+            pts = pts_left
+        else:
+            pts = pts_right
 
         warp = np.zeros_like(image).astype(np.uint8)
         cv2.fillPoly(warp, np.int_([pts]), (0, 255, 0))
