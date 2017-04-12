@@ -207,28 +207,40 @@ class LaneSearchFitted(Processor):
         l_curve_rad = self._l_lane.scaled_lane_func.get_curvative(self._image_height * self._m_per_pix[1])
         r_curve_rad = self._r_lane.scaled_lane_func.get_curvative(self._image_height * self._m_per_pix[1])
 
-        print('OOOOO: {} vs {}'.format(l_curve_rad, r_curve_rad))
-        print('XXXXX: {} vs {}'.format(self._l_lane.current_length_y, self._r_lane.current_length_y))
-
         l_x = self._l_lane.current_lane_func.apply(self._image_height)
         r_x = self._r_lane.current_lane_func.apply(self._image_height)
 
-        # Select one that was recognized best, and adjust second line accordingly
-        if self._l_lane.current_length_y > self._r_lane.current_length_y:
-            l_lane_func = self._l_lane.current_lane_func
-            r_lane_func = self._l_lane.current_lane_func.shift(r_x - l_x)
-        else:
-            l_lane_func = self._r_lane.current_lane_func.shift(l_x - r_x)
-            r_lane_func = self._r_lane.current_lane_func
+        lane_center = r_x - l_x
+        car_shift_m = (self._image_width / 2 - lane_center) * self._m_per_pix[0]
 
-        self._last_result = (l_lane_func, r_lane_func)
+        #print('OOOOO: {} vs {}'.format(l_curve_rad, r_curve_rad))
+        #print('XXXXX: {} vs {}'.format(self._l_lane.current_length_y, self._r_lane.current_length_y))
+
+        # Looks like lanes are turning in different directions
+        if (l_curve_rad < 0 < r_curve_rad) or (l_curve_rad > 0 > r_curve_rad):
+
+            # Select one that was recognized best, and adjust second line accordingly
+            if self._l_lane.current_length_y > self._r_lane.current_length_y:
+                l_lane_func = self._l_lane.current_lane_func
+                r_lane_func = self._l_lane.current_lane_func.shift(r_x - l_x)
+                curv_rad = l_curve_rad
+            else:
+                l_lane_func = self._r_lane.current_lane_func.shift(l_x - r_x)
+                r_lane_func = self._r_lane.current_lane_func
+                curv_rad = r_curve_rad
+        else:
+            l_lane_func = self._l_lane.current_lane_func
+            r_lane_func = self._r_lane.current_lane_func
+            curv_rad = np.mean([l_curve_rad, r_curve_rad])
+
+        self._last_result = (l_lane_func, r_lane_func, np.abs(curv_rad), car_shift_m)
         return self._last_result
 
     def dump_input_frame(self, image):
         return image
 
     def dump_output_frame(self, image):
-        left_func, right_func = self._last_result
+        left_func, right_func, curv_rad, car_shift_m = self._last_result
         result = draw_fitted_lanes_warped(image, left_func, right_func, self._search_margin)
         draw_centroids([self._l_lane.current_centroids, self._r_lane.current_centroids],
                        self._window_height, self._search_margin, result)

@@ -175,34 +175,9 @@ class PerspectiveWarp(Processor):
 class BinaryThreshold(Processor):
     def __init__(self):
         super().__init__()
-        #self._sobel_x_thresh = (20, 100)
-        #self._sobel_x_thresh = (20, 70)
-
-    def _sobel_threshold(self, hls):
-        s_channel = hls[:, :, 2]
-        return self._sobel(s_channel, (20, 70))
-
-    def _get_masks_old(self, image):
-        hls = cv2.cvtColor(image, cv2.COLOR_RGB2HLS).astype(np.float32)
-
-        binary_color = np.zeros_like(hls[:, :, 2])
-        channel = hls[:, :, 2]
-        binary_color[(channel > 90) & (channel <= 255)] = 1
-
-        binary_color2 = np.zeros_like(hls[:, :, 2])
-        channel = image.astype(np.float32)[:, :, 0]
-        binary_color2[(channel > 190) & (channel <= 255) & (binary_color == 1)] = 1
-
-        binary_sobel = self._sobel_threshold(hls)
-
-        return [np.zeros_like(binary_color2), binary_color2, binary_sobel]
 
     def _get_masks(self, image):
         hls = cv2.cvtColor(image, cv2.COLOR_BGR2HLS_FULL).astype(np.float32)
-
-        # binary_red = np.zeros_like(hls[:, :, 2])
-        # channel = image.astype(np.float32)[:, :, 0]
-        # binary_red[(channel > 210) & (channel <= 255)] = 1
 
         #binary_sobel = sobel(hls[:, :, 2], (25, 100))
         binary_sobel = np.zeros_like(hls[:, :, 2])
@@ -385,7 +360,7 @@ class QuadraticLaneFunc(LaneFunc):
         return QuadraticLaneFunc(fit)
 
     def get_curvative(self, y):
-        return ((1 + (2 * self._fit[0] * y + self._fit[1]) ** 2) ** 1.5) / np.absolute(2 * self._fit[0])
+        return ((1 + (2 * self._fit[0] * y + self._fit[1]) ** 2) ** 1.5) / (2 * self._fit[0])
 
     @property
     def loaded(self): return self._fit is not None
@@ -506,9 +481,10 @@ class DisplayLaneSearchFitted(Processor):
         self._image_source = image_source_warped
         self._search_margin = search_margin
 
-    def apply(self, lane_funcs):
+    def apply(self, items):
+        l_func, r_func, curv, car_shift_m = items
         image = self._image_source.output
-        return draw_fitted_lanes_warped(image, lane_funcs[0], lane_funcs[1], self._search_margin)
+        return draw_fitted_lanes_warped(image, l_func[0], r_func[1], self._search_margin)
 
     def dump_input_frame(self, centroids):
         image = self._image_source.output
@@ -524,36 +500,38 @@ class DisplayLaneSearchFittedUnwarped(Processor):
         self._image_source = image_source
         self._minv = cv2.getPerspectiveTransform(dst, src)
 
-    def apply(self, lane_funcs):
+    def apply(self, items):
         image = self._image_source.output
 
         ploty = np.linspace(0, image.shape[0] - 1, image.shape[0])
 
-        if lane_funcs[0].loaded:
-            l_fitx = lane_funcs[0].apply(ploty)
-            pts_left = np.array([np.transpose(np.vstack([l_fitx, ploty]))])
-        else:
-            pts_left = None
-
-        if lane_funcs[1].loaded:
-            r_fitx = lane_funcs[1].apply(ploty)
-            pts_right = np.array([np.flipud(np.transpose(np.vstack([r_fitx, ploty])))])
-        else:
-            pts_right = None
-
-        if pts_left is not None and pts_right is not None:
-            pts = np.hstack((pts_left, pts_right))
-        elif pts_left is not None:
-            pts = pts_left
-        else:
-            pts = pts_right
+        l_func, r_func, curv, car_shift_m = items
 
         warp = np.zeros_like(image).astype(np.uint8)
-        cv2.fillPoly(warp, np.int_([pts]), (0, 255, 0))
+
+        if not l_func.loaded or not r_func.loaded:
+            error = 'No lane found'
+        else:
+            l_fitx = l_func.apply(ploty)
+            r_fitx = r_func.apply(ploty)
+            pts_left = np.array([np.transpose(np.vstack([l_fitx, ploty]))])
+            pts_right = np.array([np.flipud(np.transpose(np.vstack([r_fitx, ploty])))])
+            pts = np.hstack((pts_left, pts_right))
+            cv2.fillPoly(warp, np.int_([pts]), (0, 255, 0))
+            error = ''
 
         unwarped = cv2.warpPerspective(warp, self._minv, (image.shape[1], image.shape[0]))
         result = cv2.addWeighted(image.copy(), 1, unwarped, 0.3, 0)
 
+        cv2.rectangle(result, (0, 0), (image.shape[1], 50), (0, 0, 0), -1)
+
+        if not error:
+            text = 'Curvative radius: {:.1f}m, car shift: {:.1f}m'.format(curv, car_shift_m)
+            cv2.putText(result, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (255, 255, 255), 2, cv2.LINE_AA)
+        else:
+            cv2.putText(result, error, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (255, 0, 0), 2, cv2.LINE_AA)
         return result
 
     def dump_input_frame(self, centroids):
