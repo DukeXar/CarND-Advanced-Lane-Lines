@@ -5,6 +5,7 @@ import os
 import pickle
 
 import cv2
+import scipy.interpolate
 import numpy as np
 
 
@@ -141,6 +142,15 @@ def ensure_color(image):
     return image
 
 
+def sobel(channel, x_thresh, ksize=5):
+    sobelx = cv2.Sobel(channel, cv2.CV_64F, 1, 0, ksize=ksize)
+    abs_sobelx = np.absolute(sobelx)
+    scaled_sobel = np.uint8(255 * abs_sobelx / np.max(abs_sobelx))
+    sxbinary = np.zeros_like(scaled_sobel)
+    sxbinary[(scaled_sobel >= x_thresh[0]) & (scaled_sobel <= x_thresh[1])] = 1
+    return sxbinary
+
+
 class PerspectiveWarp(Processor):
     def __init__(self, src, dst):
         super().__init__()
@@ -152,12 +162,12 @@ class PerspectiveWarp(Processor):
         return cv2.warpPerspective(image, self._m, (image.shape[1], image.shape[0]))
 
     def dump_input_frame(self, image):
-        augm = ensure_color(image)
+        augm = ensure_color(image).copy()
         draw_warp_shape(augm, self._src, draw_center=True)
         return augm
 
     def dump_output_frame(self, image):
-        augm = self.apply(ensure_color(image))
+        augm = self.apply(ensure_color(image)).copy()
         draw_warp_shape(augm, self._dst, draw_center=True)
         return augm
 
@@ -167,14 +177,6 @@ class BinaryThreshold(Processor):
         super().__init__()
         #self._sobel_x_thresh = (20, 100)
         #self._sobel_x_thresh = (20, 70)
-
-    def _sobel(self, channel, x_thresh, ksize=5):
-        sobelx = cv2.Sobel(channel, cv2.CV_64F, 1, 0, ksize=ksize)
-        abs_sobelx = np.absolute(sobelx)
-        scaled_sobel = np.uint8(255 * abs_sobelx / np.max(abs_sobelx))
-        sxbinary = np.zeros_like(scaled_sobel)
-        sxbinary[(scaled_sobel >= x_thresh[0]) & (scaled_sobel <= x_thresh[1])] = 1
-        return sxbinary
 
     def _sobel_threshold(self, hls):
         s_channel = hls[:, :, 2]
@@ -196,27 +198,22 @@ class BinaryThreshold(Processor):
         return [np.zeros_like(binary_color2), binary_color2, binary_sobel]
 
     def _get_masks(self, image):
-        yuv = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
-        clahe = cv2.createCLAHE(clipLimit=2.0)
-        cl1 = clahe.apply(yuv[:, :, 0])
-        yuv[:, :, 0] = cl1
-        image = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
-
         hls = cv2.cvtColor(image, cv2.COLOR_BGR2HLS_FULL).astype(np.float32)
 
         # binary_red = np.zeros_like(hls[:, :, 2])
         # channel = image.astype(np.float32)[:, :, 0]
         # binary_red[(channel > 210) & (channel <= 255)] = 1
 
-        binary_sobel = self._sobel(hls[:, :, 2], (25, 100))
-        #binary_sobel = np.zeros_like(hls[:, :, 2])
+        #binary_sobel = sobel(hls[:, :, 2], (25, 100))
+        binary_sobel = np.zeros_like(hls[:, :, 2])
 
         yellow_line = np.zeros_like(hls[:, :, 0])
-        yellow_line[(hls[:, :, 0] >= 26) & (hls[:, :, 0] <= 50) & (hls[:, :, 2] > 45)] = 1
-        # yellow_line = self._sobel(yellow_line, (40, 100))
+        #yellow_line[(hls[:, :, 0] >= 26) & (hls[:, :, 0] <= 50) & (hls[:, :, 2] > 45)] = 1
+        yellow_line[(hls[:, :, 0] >= 27) & (hls[:, :, 0] <= 40) & (hls[:, :, 2] > 60)] = 1
+        #yellow_line = sobel(yellow_line, (40, 100))
 
         white_line = np.zeros_like(hls[:, :, 0])
-        white_line[(image[:, :, 0] > 220) & (image[:, :, 1] > 220) & (image[:, :, 2] > 200)] = 1
+        white_line[(image[:, :, 0] > 200) & (image[:, :, 1] > 200) & (image[:, :, 2] > 200)] = 1
 
         return [white_line, yellow_line, binary_sobel]
 
@@ -266,13 +263,6 @@ def find_initial_centroids_lane(image, window_width, left, right, height_k=0.5):
         return center_x
 
     return None
-
-    #histogram = np.sum(image[image.shape[0] / 2:, :], axis=0)
-    #midpoint = np.int(histogram.shape[0] / 2)
-    #leftx_base = np.argmax(histogram[:midpoint])
-    #rightx_base = np.argmax(histogram[midpoint:]) + midpoint
-
-    #return center_x
 
 
 def find_window_centroids_lane(image, window_width, window_height, margin, center_x):
@@ -350,59 +340,6 @@ def draw_centroids(centroids, window_width, window_height, image):
     return output
 
 
-class LaneSearchCentroids(Processor):
-    def __init__(self, window_width, window_height, search_margin):
-        super().__init__()
-        # TODO: What about using non-linear grid?
-        self._window_width = window_width
-        self._window_height = window_height
-        self._search_margin = search_margin
-
-    def apply(self, image):
-        middle = int(image.shape[1] / 2)
-        l_center = (repeatedly_find_initial_centroids_lane(image, self._window_width, 0, middle), image.shape[0])
-        l_centroids = find_window_centroids_lane(image, self._window_width, self._window_height,
-                                                 self._search_margin, l_center[0])
-
-        r_center = (repeatedly_find_initial_centroids_lane(image, self._window_width, middle, image.shape[1]), image.shape[0])
-        r_centroids = find_window_centroids_lane(image, self._window_width, self._window_height,
-                                                 self._search_margin, r_center[0])
-
-        return l_centroids, r_centroids
-
-    def dump_input_frame(self, image):
-        return image
-
-    def dump_output_frame(self, image):
-        centroids = self.apply(image)
-        return draw_centroids(centroids, self._window_width, self._window_height, image * 255)
-
-    @property
-    def window_width(self): return self._window_width
-
-    @property
-    def window_height(self): return self._window_height
-
-
-class DisplayLaneSearchCentroids(Processor):
-    def __init__(self, image_source_warped, window_width, window_height):
-        super().__init__()
-        self._image_source = image_source_warped
-        self._window_width = window_width
-        self._window_height = window_height
-
-    def apply(self, centroids):
-        image = self._image_source.output
-        return draw_centroids(centroids, self._window_width, self._window_height, image * 255)
-
-    def dump_input_frame(self, centroids):
-        image = self._image_source.output
-        return image
-
-    def dump_output_frame(self, centroids):
-        return self.apply(centroids)
-
-
 def repeatedly_find_initial_centroids_lane(image, window_width, left, right):
     center_x = None
 
@@ -425,10 +362,16 @@ class LaneFunc(object):
     def load(self, points):
         raise NotImplementedError()
 
+    def shift(self, dx):
+        raise NotImplementedError()
+
+    def get_curvative(self, y):
+        raise NotImplementedError()
+
 
 class QuadraticLaneFunc(LaneFunc):
-    def __init__(self):
-        self._fit = None
+    def __init__(self, fit=None):
+        self._fit = fit
 
     def apply(self, ploty):
         return self._fit[0] * ploty ** 2 + self._fit[1] * ploty + self._fit[2]
@@ -436,11 +379,19 @@ class QuadraticLaneFunc(LaneFunc):
     def load(self, points):
         self._fit = np.polyfit([item[1] for item in points], [item[0] for item in points], 2)
 
+    def shift(self, dx):
+        fit = np.copy(self._fit)
+        fit[2] += dx
+        return QuadraticLaneFunc(fit)
+
+    def get_curvative(self, y):
+        return ((1 + (2 * self._fit[0] * y + self._fit[1]) ** 2) ** 1.5) / np.absolute(2 * self._fit[0])
+
     @property
     def loaded(self): return self._fit is not None
 
-
-import scipy.interpolate
+    @property
+    def fit(self): return self._fit
 
 
 class SplineLaneFunc(LaneFunc):
@@ -451,11 +402,38 @@ class SplineLaneFunc(LaneFunc):
         return self._spline(ploty)
 
     def load(self, points):
-        self._spline = scipy.interpolate.UnivariateSpline([item[1] for item in points],
-                                                          [item[0] for item in points])
+        points = sorted(((y, x) for x, y in points))
+        self._spline = scipy.interpolate.UnivariateSpline([item[0] for item in points],
+                                                                      [item[1] for item in points])
 
     @property
     def loaded(self): return self._spline is not None
+
+
+def get_search_points(func, ploty, search_margin):
+    fitx = func.apply(ploty)
+    line_window1 = np.array([np.transpose(np.vstack([fitx - search_margin, ploty]))])
+    line_window2 = np.array([np.flipud(np.transpose(np.vstack([fitx + search_margin, ploty])))])
+    pts = np.hstack((line_window1, line_window2))
+    return pts
+
+
+def draw_fitted_lanes_warped(image, l_func, r_func, search_margin, left_color=(0, 255, 0), right_color=(0, 255, 0)):
+    out_img = np.dstack((image, image, image)) * 255
+    window_img = np.zeros_like(out_img)
+
+    ploty = np.linspace(0, image.shape[0] - 1, image.shape[0])
+
+    if l_func.loaded:
+        left_line_pts = get_search_points(l_func, ploty, search_margin)
+        cv2.fillPoly(window_img, np.int_([left_line_pts]), left_color)
+
+    if r_func.loaded:
+        right_line_pts = get_search_points(r_func, ploty, search_margin)
+        cv2.fillPoly(window_img, np.int_([right_line_pts]), right_color)
+
+    result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
+    return result
 
 
 class SingleLaneSearch(object):
@@ -484,32 +462,6 @@ class SingleLaneSearch(object):
     @property
     def current_centroids(self):
         return self._current_centroids
-
-
-def get_search_points(func, ploty, search_margin):
-    fitx = func.apply(ploty)
-    line_window1 = np.array([np.transpose(np.vstack([fitx - search_margin, ploty]))])
-    line_window2 = np.array([np.flipud(np.transpose(np.vstack([fitx + search_margin, ploty])))])
-    pts = np.hstack((line_window1, line_window2))
-    return pts
-
-
-def draw_fitted_lanes_warped(image, l_func, r_func, search_margin, left_color=(0, 255, 0), right_color=(0, 255, 0)):
-    out_img = np.dstack((image, image, image)) * 255
-    window_img = np.zeros_like(out_img)
-
-    ploty = np.linspace(0, image.shape[0] - 1, image.shape[0])
-
-    if l_func.loaded:
-        left_line_pts = get_search_points(l_func, ploty, search_margin)
-        cv2.fillPoly(window_img, np.int_([left_line_pts]), left_color)
-
-    if r_func.loaded:
-        right_line_pts = get_search_points(r_func, ploty, search_margin)
-        cv2.fillPoly(window_img, np.int_([right_line_pts]), right_color)
-
-    result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
-    return result
 
 
 class LaneSearchFitted(Processor):

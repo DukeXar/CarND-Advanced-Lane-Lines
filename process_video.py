@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 
+import argparse
 import collections
+import os
+
+import cv2
+import numpy as np
 from moviepy.editor import VideoFileClip, clips_array
 
 import camera
-import cv2
-import os
-import pickle
-import logging
-import argparse
-import numpy as np
+import camera2
 
 
 class ProcessPipeline(object):
@@ -18,12 +18,14 @@ class ProcessPipeline(object):
         self._thresholding = camera.BinaryThreshold()
         self._perspective_warp = camera.PerspectiveWarp(perspective_warp_config.src, perspective_warp_config.dst)
 
-        show_centroids = False
-        if show_centroids:
-            self._lane_search = camera.LaneSearchCentroids(search_margin=100, window_width=50, window_height=80)
-            self._display_lanes = camera.DisplayLaneSearchCentroids(self._perspective_warp,
-                                                                    window_width=self._lane_search.window_width,
-                                                                    window_height=self._lane_search.window_height)
+        version_2 = True
+        if version_2:
+            self._lane_search = camera2.LaneSearchFitted(search_margin=150, window_height=80,
+                                                         image_height=720, image_width=1280,
+                                                         m_per_pix=(3.7 / 700, 30 / 720))
+            self._display_lanes = camera.DisplayLaneSearchFittedUnwarped(self._camera_calibration,
+                                                                         perspective_warp_config.src,
+                                                                         perspective_warp_config.dst)
         else:
             self._lane_search = camera.LaneSearchFitted(search_margin=100, window_width=50, window_height=80,
                                                         image_height=720, image_width=1280)
@@ -57,8 +59,8 @@ class ProcessPipeline(object):
         frame = image
         for name, stage in self._stages.items():
             result[name + '_in'] = stage.dump_input_frame(frame)
-            result[name + '_out'] = stage.dump_output_frame(frame)
             stage.process(frame)
+            result[name + '_out'] = stage.dump_output_frame(frame)
             frame = stage.output
 
         return result
@@ -77,7 +79,8 @@ def main():
 
     args = parser.parse_args()
 
-    offset = 400
+    offset_x = 400
+    offset_y = 0
     width = 1280
     height = 720
 
@@ -88,7 +91,17 @@ def main():
         # Top line left(x, y), right(x, y)
         [601, 448], [689, 448]
     ]), dst=np.float32([
-        [offset, height], [width - offset, height], [offset, 0], [width - offset, 0]
+        [offset_x, height - offset_y], [width - offset_x, height - offset_y], [offset_x, offset_y], [width - offset_x, offset_y]
+    ]))
+
+    # obtained on second 20
+    perspective_warp_config = camera.PerspectiveWarpConfig(src=np.float32([
+        # Bottom line  left(x, y), right(x, y)
+        [252, 690], [1056, 690],
+        # Top line left(x, y), right(x, y)
+        [601, 448], [689, 448]
+    ]), dst=np.float32([
+        [offset_x, height - offset_y], [width - offset_x, height - offset_y], [offset_x, offset_y], [width - offset_x, offset_y]
     ]))
 
     camera_calibration_config = camera.load_camera_calibration()
