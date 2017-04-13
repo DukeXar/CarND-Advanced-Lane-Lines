@@ -9,29 +9,24 @@ import numpy as np
 from moviepy.editor import VideoFileClip, clips_array
 
 import camera
-import camera2
+import lanes_display
+import lanes_fit
+import threshold
 
 
 class ProcessPipeline(object):
-    def __init__(self, camera_calibration_config, perspective_warp_config):
+    def __init__(self, camera_calibration_config, perspective_warp_config, image_height, image_width, m_per_pix):
         self._camera_calibration = camera.CameraCalibration(camera_calibration_config)
-        self._thresholding = camera.BinaryThreshold()
+        self._thresholding = threshold.BinaryThreshold()
         self._perspective_warp = camera.PerspectiveWarp(perspective_warp_config.src, perspective_warp_config.dst)
 
-        version_2 = True
-        if version_2:
-            self._lane_search = camera2.LaneSearchFitted(search_margin=150, window_height=80,
-                                                         image_height=720, image_width=1280,
-                                                         m_per_pix=(3.7 / 700, 30 / 720))
-            self._display_lanes = camera.DisplayLaneSearchFittedUnwarped(self._camera_calibration,
-                                                                         perspective_warp_config.src,
-                                                                         perspective_warp_config.dst)
-        else:
-            self._lane_search = camera.LaneSearchFitted(search_margin=100, window_width=50, window_height=80,
-                                                        image_height=720, image_width=1280)
-            self._display_lanes = camera.DisplayLaneSearchFittedUnwarped(self._camera_calibration,
-                                                                         perspective_warp_config.src,
-                                                                         perspective_warp_config.dst)
+        self._lane_search = lanes_fit.LaneSearchFitted(search_margin=150, window_height=80,
+                                                       image_height=image_height, image_width=image_width,
+                                                       m_per_pix=m_per_pix,
+                                                       smooth=False)
+        self._display_lanes = lanes_display.DisplayLaneSearchFittedUnwarped(self._camera_calibration,
+                                                                            perspective_warp_config.src,
+                                                                            perspective_warp_config.dst)
 
         self._stages = collections.OrderedDict([
             ('1.cam_calibration', self._camera_calibration),
@@ -49,7 +44,7 @@ class ProcessPipeline(object):
             stage.process(frame)
             frame = stage.output
             idx += 1
-            if limit > 0 and idx >= limit:
+            if 0 < limit <= idx:
                 break
         return frame
 
@@ -81,18 +76,8 @@ def main():
 
     offset_x = 400
     offset_y = 0
-    width = 1280
-    height = 720
-
-    # obtained on second 20
-    perspective_warp_config = camera.PerspectiveWarpConfig(src=np.float32([
-        # Bottom line  left(x, y), right(x, y)
-        [315, 680], [1025, 680],
-        # Top line left(x, y), right(x, y)
-        [601, 448], [689, 448]
-    ]), dst=np.float32([
-        [offset_x, height - offset_y], [width - offset_x, height - offset_y], [offset_x, offset_y], [width - offset_x, offset_y]
-    ]))
+    image_width = 1280
+    image_height = 720
 
     # obtained on second 20
     perspective_warp_config = camera.PerspectiveWarpConfig(src=np.float32([
@@ -101,14 +86,17 @@ def main():
         # Top line left(x, y), right(x, y)
         [601, 448], [689, 448]
     ]), dst=np.float32([
-        [offset_x, height - offset_y], [width - offset_x, height - offset_y], [offset_x, offset_y], [width - offset_x, offset_y]
+        [offset_x, image_height - offset_y], [image_width - offset_x, image_height - offset_y],
+        [offset_x, offset_y], [image_width - offset_x, offset_y]
     ]))
 
     camera_calibration_config = camera.load_camera_calibration()
 
-    process_pipeline = ProcessPipeline(camera_calibration_config, perspective_warp_config)
+    process_pipeline = ProcessPipeline(camera_calibration_config, perspective_warp_config, image_height, image_width,
+                                       m_per_pix=(3.7 / 700, 30 / 720))
 
     def flip_colors(image):
+        # This is needed to workaround RGB vs BGR ordering in opencv and
         return image[:, :, ::-1]
 
     def flip_process_frame(frame, limit=-1):
