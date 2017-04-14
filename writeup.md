@@ -57,9 +57,7 @@ The distortion correction is implemented in the `CameraUndistortion` class in `c
 
 Here is an example of the input image and same image after undistortion:
 
-![alt text][image2_in]
-
-![alt text][image2_out]
+![alt text][image2_in] ![alt text][image2_out]
 
 #### 2. Thresholding.
 
@@ -76,9 +74,7 @@ The results of the yellow and white line masks are ORed to create the resulting 
 
 Here is an example of the output for this step, and example of what each of the mask selected: blue - yellow line mask, green - white line mask, red - Sobel operator mask.
 
-![alt text][image3_out]
-
-![alt text][image3_masks]
+![alt text][image3_out] ![alt text][image3_masks]
 
 #### 3. Perspective transformation.
 
@@ -88,9 +84,7 @@ The perspective warp points are defined in the `perspective_warp_config` variabl
 
 Here is an example of the unwarped and warped images, which shows that transformation is working as desired, as the lines appear parallel in the warped image.
 
-![alt text][image4_in]
-
-![alt text][image4_out]
+![alt text][image4_in] ![alt text][image4_out]
 
 #### 4. Detecting the lane line pixels and fitting with a polynomial.
 
