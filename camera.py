@@ -84,7 +84,7 @@ def load_camera_calibration(calibration_images_dir='./camera_cal',
     return cal
 
 
-class CameraCalibration(Processor):
+class CameraUndistortion(Processor):
     def __init__(self, config):
         super().__init__()
         self._config = config

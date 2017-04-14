@@ -71,15 +71,18 @@ class DisplayLaneSearchFittedUnwarped(Processor):
         result = cv2.addWeighted(image.copy(), 1, unwarped, 0.3, 0)
 
         # Display measurements.
-        cv2.rectangle(result, (0, 0), (image.shape[1], 100), (0, 0, 0), -1)
+        cv2.rectangle(result, (0, 0), (image.shape[1], 120), (0, 0, 0), -1)
 
         if not error:
-            text = 'Curvative radius: {:.1f}m, car shift: {:.1f}m'.format(curv, car_shift_m)
-            cv2.putText(result, text, (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                        (255, 255, 255), 2, cv2.LINE_AA)
+            text = f'Curvative radius: {curv:.1f}m'
+            cv2.putText(result, text, (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+
+            direction = 'left' if car_shift_m < 0 else 'right'
+            text = f'Shift from center: {abs(car_shift_m):.1f}m (to the {direction})'
+            cv2.putText(result, text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
         else:
-            cv2.putText(result, error, (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                        (255, 0, 0), 2, cv2.LINE_AA)
+            cv2.putText(result, error, (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+
         return result
 
     def dump_input_frame(self, items):

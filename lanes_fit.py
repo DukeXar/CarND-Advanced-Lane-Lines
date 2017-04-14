@@ -71,8 +71,8 @@ def find_initial_centroids(image, left, right, height_k=0.25):
     return base
 
 
-def find_centroids_and_points(image, window_height, search_margin, center_x):
-    threshold_pixels = 50
+def find_centroids_and_points(image, window_height, search_margin, center_x, threshold_pixels=50):
+
 
     height = image.shape[0]
     nwindows = int(height / window_height)
@@ -110,8 +110,8 @@ def find_centroids_and_points(image, window_height, search_margin, center_x):
     return centers, all_points
 
 
-def find_centroids_and_points_nonlinear(image, window_height, search_margin, center_x):
-    threshold_pixels = 50
+def find_centroids_and_points_nonlinear(image, window_height, search_margin, center_x, threshold_pixels=50):
+
 
     height = image.shape[0]
 
@@ -226,7 +226,7 @@ class SingleLaneSearch(object):
         center_x = find_initial_centroids(image, self._left, self._right)
         centroids, points = find_centroids_and_points(image, self._window_height, self._search_margin, center_x)
 
-        if centroids and points:
+        if centroids and points:  # Keep values from the previous frame if nothing was found
             self._current_lane_func.load(points)
             self._scaled_lane_func.load([(x * self._m_per_pix[0], y * self._m_per_pix[1]) for x, y in points])
             self._current_centroids = centroids
@@ -330,9 +330,8 @@ class LaneSearchFitted(Processor):
 
         l_x = self._l_lane.current_lane_func.apply(self._image_height)
         r_x = self._r_lane.current_lane_func.apply(self._image_height)
-
-        lane_center = r_x - l_x
-        car_shift_m = (self._image_width / 2 - lane_center) * self._m_per_pix[0]
+        lane_width = r_x - l_x
+        car_shift_m = (self._image_width / 2 - (l_x + lane_width / 2)) * self._m_per_pix[0]
 
         #print('OOOOO: {} vs {}'.format(l_curve_rad, r_curve_rad))
         #print('XXXXX: {} vs {}'.format(self._l_lane.current_length_y, self._r_lane.current_length_y))
@@ -344,10 +343,10 @@ class LaneSearchFitted(Processor):
             # Select one that was recognized best, and adjust second line accordingly
             if self._l_lane.current_length_y > self._r_lane.current_length_y:
                 l_lane_func = self._l_lane.current_lane_func
-                r_lane_func = self._l_lane.current_lane_func.shift(r_x - l_x)
+                r_lane_func = self._l_lane.current_lane_func.shift(lane_width)
                 curv_rad = l_curve_rad
             else:
-                l_lane_func = self._r_lane.current_lane_func.shift(l_x - r_x)
+                l_lane_func = self._r_lane.current_lane_func.shift(-lane_width)
                 r_lane_func = self._r_lane.current_lane_func
                 curv_rad = r_curve_rad
         else:

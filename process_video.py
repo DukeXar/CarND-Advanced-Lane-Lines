@@ -16,7 +16,7 @@ import threshold
 
 class ProcessPipeline(object):
     def __init__(self, camera_calibration_config, perspective_warp_config, image_height, image_width, m_per_pix):
-        self._camera_calibration = camera.CameraCalibration(camera_calibration_config)
+        self._undistortion = camera.CameraUndistortion(camera_calibration_config)
         self._thresholding = threshold.BinaryThreshold()
         self._perspective_warp = camera.PerspectiveWarp(perspective_warp_config.src, perspective_warp_config.dst)
 
@@ -24,12 +24,12 @@ class ProcessPipeline(object):
                                                        image_height=image_height, image_width=image_width,
                                                        m_per_pix=m_per_pix,
                                                        smooth=False)
-        self._display_lanes = lanes_display.DisplayLaneSearchFittedUnwarped(self._camera_calibration,
+        self._display_lanes = lanes_display.DisplayLaneSearchFittedUnwarped(self._undistortion,
                                                                             perspective_warp_config.src,
                                                                             perspective_warp_config.dst)
 
         self._stages = collections.OrderedDict([
-            ('1.cam_calibration', self._camera_calibration),
+            ('1.undistortion', self._undistortion),
             ('2.thresholding', self._thresholding),
             ('3.perspective_warp', self._perspective_warp),
             ('4.lane_search', self._lane_search),
