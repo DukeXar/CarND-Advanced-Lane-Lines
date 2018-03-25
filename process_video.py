@@ -14,7 +14,7 @@ import lanes_fit
 import threshold
 
 
-class ProcessPipeline(object):
+class LanesProcessPipeline(object):
     def __init__(self, camera_calibration_config, perspective_warp_config, image_height, image_width, m_per_pix):
         self._undistortion = camera.CameraUndistortion(camera_calibration_config)
         self._thresholding = threshold.BinaryThreshold()
@@ -92,8 +92,8 @@ def main():
 
     camera_calibration_config = camera.load_camera_calibration()
 
-    process_pipeline = ProcessPipeline(camera_calibration_config, perspective_warp_config, image_height, image_width,
-                                       m_per_pix=(3.7 / 700, 30 / 720))
+    process_pipeline = LanesProcessPipeline(camera_calibration_config, perspective_warp_config, image_height,
+                                            image_width, m_per_pix=(3.7 / 700, 30 / 720))
 
     def flip_colors(image):
         # This is needed to workaround RGB vs BGR ordering in opencv and
